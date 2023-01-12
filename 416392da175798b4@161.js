@@ -27,6 +27,7 @@ function _chart(d3,topojson,us,path)
     .data(topojson.feature(us, us.objects.states).features)
     .join("path")
       .on("click", clicked)
+      .on("dblclick", reset);
       .attr("d", path);
   
   states.append("title")
