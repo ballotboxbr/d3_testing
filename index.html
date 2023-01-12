@@ -1,148 +1,124 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>D3: Zoom in to reveal counties</title>
-    <style>
-        .background {
-            fill: none;
-            pointer-events: all;
-        }
+<meta charset="utf-8">
+<style>
 
-        #states {
-            fill: #aaa;
-        }
+.background {
+  fill: none;
+  pointer-events: all;
+}
 
-        #states .active {
-            display:none;
-        }
+.feature {
+  fill: #ccc;
+  cursor: pointer;
+}
 
-        #state-borders {
-            fill: none;
-            stroke: #fff;
-            stroke-width: 1.5px;
-            stroke-linejoin: round;
-            stroke-linecap: round;
-            pointer-events: none;
-        }
+.feature.active {
+  fill: orange;
+}
 
-        .county-boundary {
-            fill: #aaa;
-            stroke: #fff;
-            stroke-width: .5px;
-        }
+.mesh {
+  fill: none;
+  stroke: #fff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
-        .county-boundary:hover, .state:hover {
-            fill: orange;
-        }
-    </style>
-</head>
+</style>
 <body>
-    <div class="viz"></div>
-    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/d3/5.7.0/d3.min.js"></script>
-    <script type="text/javascript" src="http://d3js.org/topojson.v3.min.js"></script>
-    <script type="text/javascript">
-        var margin = {
-            top: 10,
-            bottom: 10,
-            left: 10,
-            right:10
-        }, width = parseInt(d3.select('.viz').style('width'))
-            , width = width - margin.left - margin.right
-            , mapRatio = 0.5
-            , height = width * mapRatio
-            , active = d3.select(null);
+<script src="https://d3js.org/d3.v4.min.js"></script> <!-- Inclusion of d3 v4 -->
+<script src="https://d3js.org/topojson.v1.min.js"></script>
+<script>
 
-        var svg = d3.select('.viz').append('svg')
-            .attr('class', 'center-container')
-            .attr('height', height + margin.top + margin.bottom)
-            .attr('width', width + margin.left + margin.right);
+var width = 960,
+    height = 500,
+    active = d3.select(null);
 
-        svg.append('rect')
-            .attr('class', 'background center-container')
-            .attr('height', height + margin.top + margin.bottom)
-            .attr('width', width + margin.left + margin.right)
-            .on('click', clicked);
+var projection = d3.geoAlbersUsa() // updated for d3 v4
+    .scale(1000)
+    .translate([width / 2, height / 2]);
 
+var zoom = d3.zoom()
+    // no longer in d3 v4 - zoom initialises with zoomIdentity, so it's already at origin
+    // .translate([0, 0]) 
+    // .scale(1) 
+    .scaleExtent([1, 8])
+    .on("zoom", zoomed);
 
-        Promise.resolve(d3.json('us-counties.topojson'))
-            .then(ready);
+var path = d3.geoPath() // updated for d3 v4
+    .projection(projection);
 
-        var projection = d3.geoAlbersUsa()
-            .translate([width /2 , height / 2])
-            .scale(width);
+var svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .on("click", stopped, true);
 
-        var path = d3.geoPath()
-            .projection(projection);
+svg.append("rect")
+    .attr("class", "background")
+    .attr("width", width)
+    .attr("height", height)
+    .on("click", reset);
 
-        var g = svg.append("g")
-            .attr('class', 'center-container center-items us-state')
-            .attr('transform', 'translate('+margin.left+','+margin.top+')')
-            .attr('width', width + margin.left + margin.right)
-            .attr('height', height + margin.top + margin.bottom)
+var g = svg.append("g");
 
-        function ready(us) {
+svg
+    .call(zoom); // delete this line to disable free zooming
+    // .call(zoom.event); // not in d3 v4
 
-            g.append("g")
-                .attr("id", "counties")
-                .selectAll("path")
-                .data(topojson.feature(us, us.objects.counties).features)
-                .enter().append("path")
-                .attr("d", path)
-                .attr("class", "county-boundary")
-                .on("click", reset);
+d3.json("http://bl.ocks.org/mbostock/raw/4090846/us.json", function(error, us) {
+  if (error) throw error;
 
-            g.append("g")
-                .attr("id", "states")
-                .selectAll("path")
-                .data(topojson.feature(us, us.objects.states).features)
-                .enter().append("path")
-                .attr("d", path)
-                .attr("class", "state")
-                .on("click", clicked);
+  g.selectAll("path")
+      .data(topojson.feature(us, us.objects.states).features)
+    .enter().append("path")
+      .attr("d", path)
+      .attr("class", "feature")
+      .on("click", clicked);
 
+  g.append("path")
+      .datum(topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; }))
+      .attr("class", "mesh")
+      .attr("d", path);
+});
 
-            g.append("path")
-                .datum(topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; }))
-                .attr("id", "state-borders")
-                .attr("d", path);
+function clicked(d) {
+  if (active.node() === this) return reset();
+  active.classed("active", false);
+  active = d3.select(this).classed("active", true);
 
-        }
+  var bounds = path.bounds(d),
+      dx = bounds[1][0] - bounds[0][0],
+      dy = bounds[1][1] - bounds[0][1],
+      x = (bounds[0][0] + bounds[1][0]) / 2,
+      y = (bounds[0][1] + bounds[1][1]) / 2,
+      scale = Math.max(1, Math.min(8, 0.9 / Math.max(dx / width, dy / height))),
+      translate = [width / 2 - scale * x, height / 2 - scale * y];
 
-        function clicked(d) {
-            if (d3.select('.background').node() === this) return reset();
+  svg.transition()
+      .duration(750)
+      // .call(zoom.translate(translate).scale(scale).event); // not in d3 v4
+      .call( zoom.transform, d3.zoomIdentity.translate(translate[0],translate[1]).scale(scale) ); // updated for d3 v4
+}
 
-            if (active.node() === this) return reset();
+function reset() {
+  active.classed("active", false);
+  active = d3.select(null);
 
-            active.classed("active", false);
-            active = d3.select(this).classed("active", true);
+  svg.transition()
+      .duration(750)
+      // .call( zoom.transform, d3.zoomIdentity.translate(0, 0).scale(1) ); // not in d3 v4
+      .call( zoom.transform, d3.zoomIdentity ); // updated for d3 v4
+}
 
-            var bounds = path.bounds(d),
-                dx = bounds[1][0] - bounds[0][0],
-                dy = bounds[1][1] - bounds[0][1],
-                x = (bounds[0][0] + bounds[1][0]) / 2,
-                y = (bounds[0][1] + bounds[1][1]) / 2,
-                scale = .9 / Math.max(dx / width, dy / height),
-                translate = [width / 2 - scale * x, height / 2 - scale * y];
+function zoomed() {
+  g.style("stroke-width", 1.5 / d3.event.transform.k + "px");
+  // g.attr("transform", "translate(" + d3.event.translate + ")scale(" + d3.event.scale + ")"); // not in d3 v4
+  g.attr("transform", d3.event.transform); // updated for d3 v4
+}
 
-            g.transition()
-                .duration(750)
-                .style("stroke-width", 1.5 / scale + "px")
-                .attr("transform", "translate(" + translate + ")scale(" + scale + ")");
-        }
+// If the drag behavior prevents the default click,
+// also stop propagation so we don’t click-to-zoom.
+function stopped() {
+  if (d3.event.defaultPrevented) d3.event.stopPropagation();
+}
 
-
-        function reset() {
-            active.classed("active", false);
-            active = d3.select(null);
-
-            g.transition()
-                .delay(100)
-                .duration(750)
-                .style("stroke-width", "1.5px")
-                .attr('transform', 'translate('+margin.left+','+margin.top+')');
-
-        }
-    </script>
-</body>
-</html>
+</script>
